@@ -1,0 +1,21 @@
+{
+  "name": "inventory-management-system",
+  "version": "1.0.0",
+  "description": "Simple web-based Inventory Management System with role-based access for a server administration project.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.6",
+    "express": "^4.19.2",
+    "express-session": "^1.17.3",
+    "morgan": "^1.10.0",
+    "better-sqlite3": "^9.2.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}

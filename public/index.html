@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Inventory Management System</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-left">
+        <span class="logo">IMS</span>
+        <span class="title">Inventory Management System</span>
+      </div>
+      <div class="topbar-right">
+        <span id="currentRole" class="pill pill-muted">Not logged in</span>
+        <button id="logoutBtn" class="btn btn-ghost" hidden>Logout</button>
+      </div>
+    </header>
+
+    <main class="container">
+      <!-- Login panel -->
+      <section id="loginSection" class="card">
+        <h2>Login</h2>
+        <p class="muted">
+          Use seeded demo accounts:
+          <code>admin/admin123</code>,
+          <code>manager/manager123</code>,
+          <code>user/user123</code>.
+        </p>
+        <form id="loginForm" class="form-grid">
+          <label>
+            Username
+            <input type="text" id="username" required />
+          </label>
+          <label>
+            Password
+            <input type="password" id="password" required />
+          </label>
+          <button type="submit" class="btn btn-primary">Login</button>
+          <div id="loginError" class="error" role="alert"></div>
+        </form>
+      </section>
+
+      <!-- Dashboard -->
+      <section id="dashboardSection" class="grid" hidden>
+        <!-- Left column -->
+        <div class="column">
+          <div class="card">
+            <h2>System Monitoring</h2>
+            <div id="healthStatus" class="health">Loading...</div>
+            <div id="metrics" class="metrics"></div>
+          </div>
+
+          <div class="card">
+            <h2>Inventory</h2>
+            <div class="table-toolbar">
+              <span class="muted">Product catalog</span>
+              <button
+                id="addProductBtn"
+                class="btn btn-small btn-primary"
+                hidden
+              >
+                + New Product
+              </button>
+            </div>
+            <table class="table" id="productsTable">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Name</th>
+                  <th>SKU</th>
+                  <th>Quantity</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+
+            <form id="productForm" class="form-grid" hidden>
+              <h3>Create / Update Product</h3>
+              <label>
+                Name
+                <input type="text" id="productName" required />
+              </label>
+              <label>
+                SKU
+                <input type="text" id="productSku" required />
+              </label>
+              <label>
+                Quantity
+                <input type="number" id="productQty" min="0" value="0" />
+              </label>
+              <button type="submit" class="btn btn-primary">
+                Save Product
+              </button>
+              <div class="muted">
+                Managers and admins can add or update products.
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Right column -->
+        <div class="column">
+          <div class="card">
+            <h2>Requests / Orders</h2>
+            <div class="table-toolbar">
+              <span class="muted">
+                Users create requests. Managers/Admins approve or reject.
+              </span>
+            </div>
+            <table class="table" id="ordersTable">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Product</th>
+                  <th>Qty</th>
+                  <th>Status</th>
+                  <th>Requester</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+
+            <form id="orderForm" class="form-grid">
+              <h3>Create Request</h3>
+              <label>
+                Product
+                <select id="orderProduct"></select>
+              </label>
+              <label>
+                Quantity
+                <input type="number" id="orderQty" min="1" value="1" />
+              </label>
+              <button type="submit" class="btn btn-primary">
+                Submit Request
+              </button>
+            </form>
+          </div>
+
+          <div class="card" id="adminPanel" hidden>
+            <h2>Admin Panel</h2>
+            <div class="tabs">
+              <button
+                class="tab active"
+                data-tab="usersTab"
+                type="button"
+              >
+                Users
+              </button>
+              <button class="tab" data-tab="logsTab" type="button">
+                Logs
+              </button>
+            </div>
+
+            <div id="usersTab" class="tab-content">
+              <h3>User Management</h3>
+              <table class="table" id="usersTable">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Username</th>
+                    <th>Role</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+
+              <form id="userForm" class="form-grid">
+                <h4>Create User</h4>
+                <label>
+                  Username
+                  <input type="text" id="newUsername" required />
+                </label>
+                <label>
+                  Password
+                  <input type="password" id="newPassword" required />
+                </label>
+                <label>
+                  Role
+                  <select id="newRole">
+                    <option value="user">User</option>
+                    <option value="manager">Manager</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </label>
+                <button type="submit" class="btn btn-primary">
+                  Create User
+                </button>
+              </form>
+            </div>
+
+            <div id="logsTab" class="tab-content hidden">
+              <h3>Application Logs</h3>
+              <p class="muted">
+                Shows latest application actions from all roles (login,
+                inventory changes, approvals, etc).
+              </p>
+              <table class="table" id="logsTable">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>User</th>
+                    <th>Action</th>
+                    <th>Details</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span class="muted">
+        Scenario: client (browser) ↔ server (Node.js + Express + SQLite) with
+        role-based access, monitoring, and logging.
+      </span>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+  </html>
+
+

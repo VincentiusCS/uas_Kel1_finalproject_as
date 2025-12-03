@@ -1,0 +1,9 @@
+2025-12-03T14:32:19.114Z | admin | login | Role=admin
+2025-12-03T14:33:34.666Z | admin | logout | 
+2025-12-03T14:33:54.226Z | user | login | Role=user
+2025-12-03T14:34:16.319Z | user | create_order | id=1, product_id=1
+2025-12-03T14:34:20.685Z | user | logout | 
+2025-12-03T14:34:22.692Z | anonymous | logout | 
+2025-12-03T14:34:25.503Z | anonymous | logout | 
+2025-12-03T14:34:36.989Z | manager | login | Role=manager
+2025-12-03T14:34:45.725Z | manager | approve_order | id=1
