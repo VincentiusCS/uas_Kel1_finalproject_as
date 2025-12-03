@@ -9,7 +9,18 @@ const Database = require('better-sqlite3');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DB_FILE = path.join(__dirname, '..', 'data.db');
+const HOST = process.env.HOST || '0.0.0.0';
+
+// Database file: allow override via environment variable for containers
+const DEFAULT_DB_PATH = path.join(__dirname, '..', 'data', 'inventory.db');
+const DB_FILE = process.env.DB_PATH || DEFAULT_DB_PATH;
+
+// Ensure DB directory exists
+const dbDir = path.dirname(DB_FILE);
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
+
 const LOG_FILE = path.join(__dirname, '..', 'audit.log');
 const db = new Database(DB_FILE);
 
@@ -262,19 +273,54 @@ app.get('/api/metrics', (req, res) => {
     const user_count = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
     const product_count = db.prepare('SELECT COUNT(*) as count FROM products').get().count;
     const order_count = db.prepare('SELECT COUNT(*) as count FROM orders').get().count;
-    
+
     res.json({
       user_count,
       product_count,
-      order_count
+      order_count,
     });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch metrics' });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Inventory Management System running on http://localhost:${PORT}`);
+// Simple health endpoint for Docker / reverse proxy checks
+app.get('/health', (req, res) => {
+  try {
+    db.prepare('SELECT 1 as ok').get();
+    res.status(200).json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+    });
+  } catch (err) {
+    res.status(500).json({ status: 'db_error' });
+  }
 });
 
+// Prometheus-style metrics endpoint
+app.get('/metrics', (req, res) => {
+  try {
+    const uptime = process.uptime();
+    const mem = process.memoryUsage();
+
+    res.set('Content-Type', 'text/plain; version=0.0.4');
+    res.send(`# HELP nodejs_uptime_seconds Node.js uptime in seconds
+# TYPE nodejs_uptime_seconds gauge
+nodejs_uptime_seconds ${uptime}
+
+# HELP nodejs_memory_usage_bytes Memory usage in bytes
+# TYPE nodejs_memory_usage_bytes gauge
+nodejs_memory_usage_bytes{type="rss"} ${mem.rss}
+nodejs_memory_usage_bytes{type="heapTotal"} ${mem.heapTotal}
+nodejs_memory_usage_bytes{type="heapUsed"} ${mem.heapUsed}
+`);
+  } catch (err) {
+    res.status(500).send('# error generating metrics');
+  }
+});
+
+app.listen(PORT, HOST, () => {
+  console.log(`Inventory Management System running on http://${HOST}:${PORT}`);
+});
 
