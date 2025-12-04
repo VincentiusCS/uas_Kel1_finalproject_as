@@ -1,0 +1,13 @@
+{
+  "realm": "inventory-realm",
+  "auth-server-url": "http://keycloak:8080/",
+  "ssl-required": "none",
+  "resource": "inventory-app",
+  "credentials": {
+    "secret": "YsfJFu3yvwvI5sKMzkhA0rRI0mpEGhsf"
+  },
+  "confidential-port": 0,
+  "policy-enforcer": {}
+}
+
+

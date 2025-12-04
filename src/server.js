@@ -6,6 +6,7 @@ const cookieParser = require('cookie-parser');
 const morgan = require('morgan');
 const fs = require('fs');
 const Database = require('better-sqlite3');
+const Keycloak = require('keycloak-connect');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -104,13 +105,25 @@ function auditLog(username, action, details) {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+
+// Shared session store (required by keycloak-connect)
+const memoryStore = new session.MemoryStore();
 app.use(
   session({
     secret: 'inventory-secret',
     resave: false,
     saveUninitialized: false,
+    store: memoryStore,
   })
 );
+
+// Optional Keycloak integration (for external IDP demo)
+let keycloak;
+const keycloakConfigPath = path.join(__dirname, '..', 'keycloak-config.json');
+if (fs.existsSync(keycloakConfigPath)) {
+  keycloak = new Keycloak({ store: memoryStore }, keycloakConfigPath);
+  app.use(keycloak.middleware());
+}
 
 // HTTP request logging
 app.use(
@@ -121,6 +134,19 @@ app.use(
 
 // Static frontend
 app.use(express.static(path.join(__dirname, '..', 'public')));
+
+// Example Keycloak-protected demo routes (do not affect existing login)
+if (keycloak) {
+  // Generic protected route – any authenticated Keycloak user
+  app.get('/kc/protected', keycloak.protect(), (req, res) => {
+    res.json({ message: 'Keycloak-protected route', user: req.kauth.grant.access_token.content.preferred_username });
+  });
+
+  // Role-based Keycloak route – requires realm role "admin"
+  app.get('/kc/admin', keycloak.protect('realm:admin'), (req, res) => {
+    res.json({ message: 'Keycloak admin route', roles: req.kauth.grant.access_token.content.realm_access.roles });
+  });
+}
 
 // Auth helpers
 function requireAuth(req, res, next) {
