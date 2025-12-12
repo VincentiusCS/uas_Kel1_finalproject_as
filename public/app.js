@@ -44,24 +44,37 @@ async function refreshSession() {
 }
 
 function onLoggedOut() {
-  show($('loginSection'), true);
+  // With Keycloak, we don't show a login form - redirect to login automatically
+  show($('loginSection'), false);
   show($('dashboardSection'), false);
-  setText($('currentRole'), 'Not logged in');
+  setText($('currentRole'), 'Redirecting to login...');
   $('currentRole').className = 'pill pill-muted';
   $('logoutBtn').hidden = true;
+  
+  // Redirect to root which will trigger Keycloak login
+  setTimeout(() => {
+    window.location.href = '/';
+  }, 1000);
 }
 
 async function onLoggedIn(user) {
   show($('loginSection'), false);
   show($('dashboardSection'), true);
   $('logoutBtn').hidden = false;
-  setText($('currentRole'), `${user.username} (${user.role})`);
+  
+  // Handle both old format (username/role) and new Keycloak format (username/roles array)
+  const username = user.username;
+  const role = user.role || (user.roles && user.roles.length > 0 ? user.roles[0] : 'user');
+  
+  setText($('currentRole'), `${username} (${role})`);
   $('currentRole').className =
-    'pill ' + (user.role === 'admin' ? 'pill-admin' : user.role === 'manager' ? 'pill-manager' : 'pill-user');
+    'pill ' + (role === 'admin' || (user.roles && user.roles.includes('admin')) ? 'pill-admin' : 
+               role === 'manager' || (user.roles && user.roles.includes('manager')) ? 'pill-manager' : 'pill-user');
 
-  // Role-based UI
-  const canManageProducts = user.role === 'manager' || user.role === 'admin';
-  const isAdmin = user.role === 'admin';
+  // Role-based UI (handle both old role string and new roles array)
+  const roles = user.roles || [user.role];
+  const canManageProducts = roles.includes('manager') || roles.includes('admin');
+  const isAdmin = roles.includes('admin');
 
   show($('addProductBtn'), canManageProducts);
   show($('productForm'), false); // toggled by button
@@ -302,11 +315,25 @@ async function handleLogin(evt) {
 
 async function handleLogout() {
   try {
+    // First, get the Keycloak logout URL (needs to be done while still authenticated)
+    const data = await api('/api/logout-url');
+    
+    // Then destroy the app session
     await api('/api/logout', { method: 'POST' });
-  } catch (_) {
-    // ignore
+    
+    if (data.logoutUrl) {
+      // Redirect to Keycloak logout which will clear the Keycloak session
+      // and redirect back to our app
+      window.location.href = data.logoutUrl;
+    } else {
+      // Fallback for non-Keycloak logout
+      window.location.href = '/';
+    }
+  } catch (e) {
+    console.error('Logout error:', e);
+    // Force redirect anyway - clear everything
+    window.location.href = '/';
   }
-  onLoggedOut();
 }
 
 // Initialization

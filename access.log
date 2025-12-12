@@ -289,3 +289,5 @@
 [0mGET /api/metrics [36m304[0m 3.765 ms - -[0m
 [0mGET /api/health [32m200[0m 4.049 ms - 49[0m
 [0mGET /api/metrics [36m304[0m 6.482 ms - -[0m
+[0mGET / [36m302[0m 12.750 ms - 282[0m
+[0mGET / [36m302[0m 13.095 ms - 283[0m

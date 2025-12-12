@@ -9,9 +9,10 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install --production
 
-# Copy application source
+# Copy application source and configuration
 COPY src ./src
 COPY public ./public
+COPY keycloak-config.json ./
 COPY README.md ./
 
 # Create data directory for SQLite database

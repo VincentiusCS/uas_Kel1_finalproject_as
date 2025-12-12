@@ -16,6 +16,10 @@ services:
       - ./public:/app/public                 # Easy frontend tweaks without rebuild
     networks:
       - app-network
+    extra_hosts:
+      - "keycloak.local:host-gateway"
+    depends_on:
+      - keycloak
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -163,6 +167,10 @@ services:
       KC_DB_PASSWORD: keycloak_pass
       KC_HOSTNAME_STRICT: "false"
       KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME: "keycloak.local"
+      KC_HOSTNAME_PORT: "8080"
+      KC_HOSTNAME_PROTOCOL: "http"
+      KC_PROXY: "edge"
     command: start-dev
     depends_on:
       - keycloak-db

@@ -117,12 +117,61 @@ app.use(
   })
 );
 
-// Optional Keycloak integration (for external IDP demo)
+// Keycloak integration (required for authentication)
 let keycloak;
 const keycloakConfigPath = path.join(__dirname, '..', 'keycloak-config.json');
 if (fs.existsSync(keycloakConfigPath)) {
-  keycloak = new Keycloak({ store: memoryStore }, keycloakConfigPath);
-  app.use(keycloak.middleware());
+  try {
+    const keycloakConfig = JSON.parse(fs.readFileSync(keycloakConfigPath, 'utf8'));
+    
+    // Ensure auth-server-url ends with /
+    if (!keycloakConfig['auth-server-url'].endsWith('/')) {
+      keycloakConfig['auth-server-url'] += '/';
+    }
+    
+    keycloak = new Keycloak({ store: memoryStore }, keycloakConfig);
+    app.use(keycloak.middleware());
+    console.log('✓ Keycloak integration enabled');
+    console.log(`  Auth Server URL: ${keycloakConfig['auth-server-url']}`);
+    console.log(`  Realm: ${keycloakConfig.realm}`);
+    console.log(`  Resource: ${keycloakConfig.resource}`);
+  } catch (err) {
+    console.error('❌ Error loading Keycloak config:', err.message);
+    process.exit(1);
+  }
+} else {
+  console.warn('⚠ WARNING: keycloak-config.json not found. Keycloak authentication disabled.');
+}
+
+// Helper function to get user info from Keycloak token
+function getKeycloakUser(req) {
+  if (!keycloak || !req.kauth || !req.kauth.grant) {
+    return null;
+  }
+  const token = req.kauth.grant.access_token.content;
+  return {
+    username: token.preferred_username || token.username,
+    roles: token.realm_access?.roles || [],
+    email: token.email,
+  };
+}
+
+// Helper function to check if user has any of the required roles
+function hasAnyRole(req, requiredRoles) {
+  const user = getKeycloakUser(req);
+  if (!user) return false;
+  return requiredRoles.some(role => user.roles.includes(role));
+}
+
+// Keycloak role-based middleware (for routes requiring manager OR admin)
+function requireManagerOrAdmin(req, res, next) {
+  if (!keycloak) {
+    return res.status(503).json({ error: 'Keycloak not configured' });
+  }
+  if (!hasAnyRole(req, ['manager', 'admin'])) {
+    return res.status(403).json({ error: 'Requires manager or admin role' });
+  }
+  next();
 }
 
 // HTTP request logging
@@ -132,25 +181,28 @@ app.use(
   })
 );
 
-// Static frontend
-app.use(express.static(path.join(__dirname, '..', 'public')));
-
-// Example Keycloak-protected demo routes (do not affect existing login)
+// Static frontend (protected by Keycloak if configured)
 if (keycloak) {
-  // Generic protected route – any authenticated Keycloak user
-  app.get('/kc/protected', keycloak.protect(), (req, res) => {
-    res.json({ message: 'Keycloak-protected route', user: req.kauth.grant.access_token.content.preferred_username });
+  // Root route - protected by Keycloak
+  app.get('/', keycloak.protect(), (req, res) => {
+    // Log successful authentication
+    const user = getKeycloakUser(req);
+    console.log(`✓ User authenticated: ${user?.username}, roles: ${user?.roles?.join(', ') || 'none'}`);
+    res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
   });
-
-  // Role-based Keycloak route – requires realm role "admin"
-  app.get('/kc/admin', keycloak.protect('realm:admin'), (req, res) => {
-    res.json({ message: 'Keycloak admin route', roles: req.kauth.grant.access_token.content.realm_access.roles });
-  });
+  
+  // Serve static files (public assets like CSS, JS) without protection
+  app.use(express.static(path.join(__dirname, '..', 'public')));
+} else {
+  app.use(express.static(path.join(__dirname, '..', 'public')));
 }
 
-// Auth helpers
+// Legacy auth helpers (kept for backward compatibility, but routes now use Keycloak)
 function requireAuth(req, res, next) {
-  if (!req.session.user) {
+  if (!keycloak) {
+    return res.status(503).json({ error: 'Keycloak not configured' });
+  }
+  if (!req.kauth || !req.kauth.grant) {
     return res.status(401).json({ error: 'Not authenticated' });
   }
   next();
@@ -158,7 +210,10 @@ function requireAuth(req, res, next) {
 
 function requireRole(roles) {
   return (req, res, next) => {
-    if (!req.session.user || !roles.includes(req.session.user.role)) {
+    if (!keycloak) {
+      return res.status(503).json({ error: 'Keycloak not configured' });
+    }
+    if (!hasAnyRole(req, roles)) {
       return res.status(403).json({ error: 'Forbidden' });
     }
     next();
@@ -166,83 +221,155 @@ function requireRole(roles) {
 }
 
 // Routes
+// Legacy login endpoint (deprecated - use Keycloak login instead)
 app.post('/api/login', (req, res) => {
-  const { username, password } = req.body;
-  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
-  if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-
-  const ok = bcrypt.compareSync(password, user.password_hash);
-  if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
-
-  req.session.user = { id: user.id, username: user.username, role: user.role };
-  auditLog(user.username, 'login', `Role=${user.role}`);
-  res.json({ username: user.username, role: user.role });
+  res.status(410).json({ error: 'This endpoint is deprecated. Please use Keycloak authentication.' });
 });
 
+// Keycloak logout endpoint - provides logout URL
+app.get('/api/logout-url', keycloak ? keycloak.protect() : (req, res, next) => next(), (req, res) => {
+  if (keycloak && req.kauth && req.kauth.grant) {
+    // Get the id_token from the grant
+    const idToken = req.kauth.grant.id_token.token;
+    // Construct Keycloak logout URL with id_token_hint
+    const logoutUrl = `http://keycloak.local:8080/realms/inventory-realm/protocol/openid-connect/logout?id_token_hint=${idToken}&post_logout_redirect_uri=${encodeURIComponent('http://localhost:3000')}`;
+    res.json({ logoutUrl });
+  } else {
+    res.json({ logoutUrl: null });
+  }
+});
+
+// POST logout endpoint (for session cleanup)
 app.post('/api/logout', (req, res) => {
-  const username = req.session.user?.username;
+  const user = keycloak && req.kauth ? getKeycloakUser(req) : req.session?.user;
+  if (user) {
+    auditLog(user?.username, 'logout', 'Session destroyed');
+  }
   req.session.destroy(() => {
-    auditLog(username, 'logout', '');
     res.json({ ok: true });
   });
 });
 
-app.get('/api/me', (req, res) => {
-  res.json(req.session.user || null);
+// Logged out page route (unprotected)
+app.get('/logged-out', (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Logged Out</title>
+      <meta http-equiv="refresh" content="2;url=/">
+    </head>
+    <body style="font-family: system-ui; text-align: center; padding: 50px;">
+      <h1>You have been logged out</h1>
+      <p>Redirecting to login...</p>
+      <p><a href="/">Click here if not redirected automatically</a></p>
+    </body>
+    </html>
+  `);
+});
+
+// Get current user info from Keycloak token
+app.get('/api/me', keycloak ? keycloak.protect() : (req, res, next) => next(), (req, res) => {
+  if (keycloak && req.kauth) {
+    const user = getKeycloakUser(req);
+    res.json({
+      username: user?.username,
+      email: user?.email,
+      roles: user?.roles || [],
+    });
+  } else {
+    res.json(req.session.user || null);
+  }
 });
 
 // Products
-app.get('/api/products', requireAuth, (req, res) => {
+app.get('/api/products', keycloak ? keycloak.protect() : requireAuth, (req, res) => {
   const rows = db.prepare('SELECT * FROM products').all();
   res.json(rows);
 });
 
-app.post('/api/products', requireRole(['manager', 'admin']), (req, res) => {
+app.post('/api/products', keycloak ? requireManagerOrAdmin : requireRole(['manager', 'admin']), (req, res) => {
   const { name, sku, quantity } = req.body;
   const result = db.prepare(
     'INSERT INTO products (name, sku, quantity) VALUES (?, ?, ?)'
   ).run(name, sku, quantity || 0);
-  auditLog(req.session.user.username, 'create_product', `id=${result.lastInsertRowid}, sku=${sku}`);
+  const user = keycloak ? getKeycloakUser(req) : req.session.user;
+  auditLog(user?.username, 'create_product', `id=${result.lastInsertRowid}, sku=${sku}`);
   res.json({ id: result.lastInsertRowid, name, sku, quantity: quantity || 0 });
 });
 
-app.put('/api/products/:id', requireRole(['manager', 'admin']), (req, res) => {
+app.put('/api/products/:id', keycloak ? requireManagerOrAdmin : requireRole(['manager', 'admin']), (req, res) => {
   const { id } = req.params;
   const { name, sku, quantity } = req.body;
   const result = db.prepare(
     'UPDATE products SET name=?, sku=?, quantity=? WHERE id=?'
   ).run(name, sku, quantity, id);
-  auditLog(req.session.user.username, 'update_product', `id=${id}`);
+  const user = keycloak ? getKeycloakUser(req) : req.session.user;
+  auditLog(user?.username, 'update_product', `id=${id}`);
   res.json({ updated: result.changes });
 });
 
 // Orders / Requests
-app.get('/api/orders', requireAuth, (req, res) => {
-  const role = req.session.user.role;
-  const userId = req.session.user.id;
+app.get('/api/orders', keycloak ? keycloak.protect() : requireAuth, (req, res) => {
   let query =
     'SELECT o.*, p.name as product_name, u.username as requester FROM orders o JOIN products p ON o.product_id = p.id JOIN users u ON o.user_id = u.id';
   const params = [];
-  if (role === 'user') {
-    query += ' WHERE o.user_id = ?';
-    params.push(userId);
+  
+  if (keycloak && req.kauth) {
+    const kcUser = getKeycloakUser(req);
+    const roles = kcUser?.roles || [];
+    // If user has only 'user' role, filter by their username
+    if (roles.includes('user') && !roles.includes('manager') && !roles.includes('admin')) {
+      const dbUser = db.prepare('SELECT id FROM users WHERE username = ?').get(kcUser.username);
+      if (dbUser) {
+        query += ' WHERE o.user_id = ?';
+        params.push(dbUser.id);
+      }
+    }
+  } else {
+    const role = req.session.user.role;
+    const userId = req.session.user.id;
+    if (role === 'user') {
+      query += ' WHERE o.user_id = ?';
+      params.push(userId);
+    }
   }
 
   const rows = db.prepare(query).all(params);
   res.json(rows);
 });
 
-app.post('/api/orders', requireRole(['user', 'manager', 'admin']), (req, res) => {
+app.post('/api/orders', keycloak ? keycloak.protect() : requireRole(['user', 'manager', 'admin']), (req, res) => {
   const { product_id, quantity } = req.body;
-  const userId = req.session.user.id;
+  
+  let userId;
+  if (keycloak && req.kauth) {
+    const kcUser = getKeycloakUser(req);
+    const dbUser = db.prepare('SELECT id FROM users WHERE username = ?').get(kcUser.username);
+    if (!dbUser) {
+      // Create user record if doesn't exist (for Keycloak users)
+      const result = db.prepare('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)').run(
+        kcUser.username,
+        '', // No password for Keycloak users
+        kcUser.roles.includes('admin') ? 'admin' : kcUser.roles.includes('manager') ? 'manager' : 'user'
+      );
+      userId = result.lastInsertRowid;
+    } else {
+      userId = dbUser.id;
+    }
+  } else {
+    userId = req.session.user.id;
+  }
+  
   const result = db.prepare(
     'INSERT INTO orders (user_id, product_id, quantity, status) VALUES (?, ?, ?, ?)'
   ).run(userId, product_id, quantity, 'pending');
-  auditLog(req.session.user.username, 'create_order', `id=${result.lastInsertRowid}, product_id=${product_id}`);
+  const user = keycloak ? getKeycloakUser(req) : req.session.user;
+  auditLog(user?.username, 'create_order', `id=${result.lastInsertRowid}, product_id=${product_id}`);
   res.json({ id: result.lastInsertRowid, user_id: userId, product_id, quantity, status: 'pending' });
 });
 
-app.post('/api/orders/:id/approve', requireRole(['manager', 'admin']), (req, res) => {
+app.post('/api/orders/:id/approve', keycloak ? requireManagerOrAdmin : requireRole(['manager', 'admin']), (req, res) => {
   const { id } = req.params;
   const order = db.prepare('SELECT * FROM orders WHERE id=?').get(id);
   if (!order) return res.status(404).json({ error: 'Order not found' });
@@ -252,34 +379,37 @@ app.post('/api/orders/:id/approve', requireRole(['manager', 'admin']), (req, res
       'UPDATE products SET quantity = quantity - ? WHERE id=?'
     ).run(order.quantity, order.product_id);
   })();
-  auditLog(req.session.user.username, 'approve_order', `id=${id}`);
+  const user = keycloak ? getKeycloakUser(req) : req.session.user;
+  auditLog(user?.username, 'approve_order', `id=${id}`);
   res.json({ ok: true });
 });
 
-app.post('/api/orders/:id/reject', requireRole(['manager', 'admin']), (req, res) => {
+app.post('/api/orders/:id/reject', keycloak ? requireManagerOrAdmin : requireRole(['manager', 'admin']), (req, res) => {
   const { id } = req.params;
   db.prepare('UPDATE orders SET status=? WHERE id=?').run('rejected', id);
-  auditLog(req.session.user.username, 'reject_order', `id=${id}`);
+  const user = keycloak ? getKeycloakUser(req) : req.session.user;
+  auditLog(user?.username, 'reject_order', `id=${id}`);
   res.json({ ok: true });
 });
 
 // Admin: users & logs
-app.get('/api/users', requireRole(['admin']), (req, res) => {
+app.get('/api/users', keycloak ? keycloak.protect('realm:admin') : requireRole(['admin']), (req, res) => {
   const rows = db.prepare('SELECT id, username, role FROM users').all();
   res.json(rows);
 });
 
-app.post('/api/users', requireRole(['admin']), (req, res) => {
+app.post('/api/users', keycloak ? keycloak.protect('realm:admin') : requireRole(['admin']), (req, res) => {
   const { username, password, role } = req.body;
   const hash = bcrypt.hashSync(password, 10);
   const result = db.prepare(
     'INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)'
   ).run(username, hash, role);
-  auditLog(req.session.user.username, 'create_user', `id=${result.lastInsertRowid}, role=${role}`);
+  const user = keycloak ? getKeycloakUser(req) : req.session.user;
+  auditLog(user?.username, 'create_user', `id=${result.lastInsertRowid}, role=${role}`);
   res.json({ id: result.lastInsertRowid, username, role });
 });
 
-app.get('/api/logs', requireRole(['admin']), (req, res) => {
+app.get('/api/logs', keycloak ? keycloak.protect('realm:admin') : requireRole(['admin']), (req, res) => {
   const rows = db.prepare('SELECT * FROM app_logs ORDER BY timestamp DESC LIMIT 100').all();
   res.json(rows);
 });
@@ -344,6 +474,16 @@ nodejs_memory_usage_bytes{type="heapUsed"} ${mem.heapUsed}
   } catch (err) {
     res.status(500).send('# error generating metrics');
   }
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('❌ Error:', err.message);
+  console.error('Stack:', err.stack);
+  res.status(err.status || 500).json({ 
+    error: err.message || 'Internal server error',
+    details: process.env.NODE_ENV !== 'production' ? err.stack : undefined
+  });
 });
 
 app.listen(PORT, HOST, () => {
